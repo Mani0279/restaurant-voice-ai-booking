@@ -25,17 +25,19 @@ const bookingSchema = new mongoose.Schema({
     max: [20, 'Maximum 20 guests allowed']
   },
   
-  bookingDate: {
-    type: Date,
-    required: [true, 'Booking date is required'],
-    validate: {
-      validator: function(value) {
-        // Don't allow past dates
-        return value >= new Date().setHours(0, 0, 0, 0);
-      },
-      message: 'Booking date cannot be in the past'
-    }
-  },
+// In your Booking schema
+bookingDate: {
+  type: Date,
+  required: true,
+  validate: {
+    validator: function(value) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return value >= today; // Allows today and future
+    },
+    message: 'Booking date cannot be in the past. Please choose today or a future date.'
+  }
+},
   
   bookingTime: {
     type: String,

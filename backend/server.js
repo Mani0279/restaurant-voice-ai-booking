@@ -1,14 +1,16 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const WebSocketServer = require('./websocket');
 
 // Import routes
 const bookingRoutes = require('./routes/bookingRoutes');
 const weatherRoutes = require('./routes/weatherRoutes');
 
 // Initialize Express app
-const app = express();
+const app = express();      
 
 // Connect to MongoDB
 connectDB();
@@ -32,7 +34,8 @@ app.get('/', (req, res) => {
     endpoints: {
       bookings: '/api/bookings',
       weather: '/api/weather',
-      health: '/api/health'
+      health: '/api/health',
+      websocket: 'ws://localhost:5000/ws'
     }
   });
 });
@@ -43,7 +46,8 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
-    database: 'connected'
+    database: 'connected',
+    websocket: 'active'
   });
 });
 
@@ -71,14 +75,21 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Create HTTP server
+const server = http.createServer(app);
+
+// Initialize WebSocket server
+const wsServer = new WebSocketServer(server);
+
 // Start server
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log('\n🚀 ========================================');
   console.log(`   Server running on port ${PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`   API URL: http://localhost:${PORT}`);
+  console.log(`   WebSocket: ws://localhost:${PORT}/ws`);
   console.log('========================================\n');
   console.log('📋 Available endpoints:');
   console.log(`   GET  http://localhost:${PORT}/`);
@@ -87,6 +98,7 @@ app.listen(PORT, () => {
   console.log(`   GET  http://localhost:${PORT}/api/bookings`);
   console.log(`   POST http://localhost:${PORT}/api/bookings/chat`);
   console.log(`   GET  http://localhost:${PORT}/api/weather`);
+  console.log(`   WS   ws://localhost:${PORT}/ws`);
   console.log('\n💡 Press Ctrl+C to stop the server\n');
 });
 
