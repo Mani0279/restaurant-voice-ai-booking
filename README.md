@@ -2,7 +2,7 @@
 
 A full-stack AI-powered voice booking system that enables users to reserve restaurant tables through natural conversation. Built with **React**, **Node.js**, **MongoDB**, **WebSockets**, and **Google Gemini AI**.
 
-![Voice Agent Demo](https://img.shields.io/badge/Status-Production%20Ready-success)
+
 ![MERN Stack](https://img.shields.io/badge/Stack-MERN-blue)
 ![WebSockets](https://img.shields.io/badge/Realtime-WebSocket-orange)
 
