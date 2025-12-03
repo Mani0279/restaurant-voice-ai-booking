@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 import speechService from '../utils/speechSynthesis';
-import { bookingAPI } from '../services/api';
 import './VoiceAgent.css';
 
 /**
- * VoiceAgent Component
- * Main voice-enabled booking interface
+ * WebSocket-Enhanced Voice Agent Component
+ * Real-time voice booking with WebSocket communication
  */
 const VoiceAgent = () => {
-  // Speech recognition hook
+  // Speech recognition
   const {
     transcript,
     listening,
@@ -25,9 +24,18 @@ const VoiceAgent = () => {
   const [bookingComplete, setBookingComplete] = useState(false);
   const [completedBooking, setCompletedBooking] = useState(null);
   const [error, setError] = useState(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [weatherInfo, setWeatherInfo] = useState(null);
 
-  // Ref for auto-scrolling chat
+  // Refs
   const chatEndRef = useRef(null);
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
+
+  // FIXED: Use correct WebSocket URL
+  const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:5000/ws';
+  const MAX_RECONNECT_ATTEMPTS = 5;
 
   // Check browser support
   if (!browserSupportsSpeechRecognition) {
@@ -40,28 +48,293 @@ const VoiceAgent = () => {
     );
   }
 
-  // Auto-scroll chat to bottom
+  // Auto-scroll chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversationHistory]);
 
-  // Start conversation with greeting
+  // Initialize WebSocket connection
   useEffect(() => {
-    startConversation();
+    connectWebSocket();
+    fetchWeatherInfo();
+
+    return () => {
+      disconnectWebSocket();
+    };
   }, []);
 
   /**
-   * Start the conversation with AI greeting
+   * Get user's current weather
    */
-  const startConversation = async () => {
-    const greeting = "Hello! Welcome to our restaurant booking service. I'm here to help you reserve a table. How can I assist you today?";
-    
-    addToHistory('agent', greeting);
-    speakText(greeting);
+  const fetchWeatherInfo = async () => {
+    try {
+      // Get user's location
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            
+            // Call weather API
+            const API_KEY = process.env.REACT_APP_WEATHER_API_KEY;
+            if (!API_KEY) {
+              console.warn('Weather API key not configured');
+              return;
+            }
+
+            const response = await fetch(
+              `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&units=metric&appid=${API_KEY}`
+            );
+            
+            if (response.ok) {
+              const data = await response.json();
+              const weather = {
+                temperature: Math.round(data.main.temp),
+                condition: data.weather[0].main,
+                description: data.weather[0].description,
+                humidity: data.main.humidity,
+                windSpeed: data.wind.speed
+              };
+              setWeatherInfo(weather);
+              console.log('🌤️ Weather fetched:', weather);
+            }
+          },
+          (error) => {
+            console.warn('Geolocation error:', error.message);
+          }
+        );
+      }
+    } catch (error) {
+      console.error('Weather fetch error:', error);
+    }
   };
 
   /**
-   * Add message to conversation history
+   * Connect to WebSocket server
+   */
+  const connectWebSocket = () => {
+    try {
+      console.log('🔌 Connecting to WebSocket:', WS_URL);
+      
+      const ws = new WebSocket(WS_URL);
+      
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected');
+        setWsConnected(true);
+        setError(null);
+        reconnectAttemptsRef.current = 0;
+        
+        // Send initial greeting request
+        ws.send(JSON.stringify({
+          type: 'greeting',
+          weatherInfo: weatherInfo
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          handleWebSocketMessage(message);
+        } catch (err) {
+          console.error('Failed to parse WebSocket message:', err);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('❌ WebSocket error:', error);
+        setError('Connection error. Retrying...');
+      };
+
+      ws.onclose = () => {
+        console.log('🔌 WebSocket disconnected');
+        setWsConnected(false);
+        
+        // Attempt reconnection
+        if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttemptsRef.current += 1;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+          
+          console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})`);
+          
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connectWebSocket();
+          }, delay);
+        } else {
+          setError('Connection lost. Please refresh the page.');
+        }
+      };
+
+      wsRef.current = ws;
+    } catch (error) {
+      console.error('WebSocket connection error:', error);
+      setError('Failed to connect to server');
+    }
+  };
+
+  /**
+   * Disconnect WebSocket
+   */
+  const disconnectWebSocket = () => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
+    
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  };
+
+  /**
+   * Handle incoming WebSocket messages
+   */
+  const handleWebSocketMessage = (message) => {
+    console.log('📨 Received message:', message);
+
+    switch (message.type) {
+      case 'connected':
+        // Initial connection confirmation
+        console.log('🔗 Connection confirmed:', message.message);
+        break;
+
+      case 'greeting':
+      case 'response':
+        if (message.text) {
+          addToHistory('agent', message.text);
+          speakText(message.text);
+        }
+        
+        if (message.conversationState) {
+          setConversationState(message.conversationState);
+        }
+        
+        setIsProcessing(false);
+        break;
+
+      case 'booking_ready':
+        // All information collected, ready for confirmation
+        if (message.text) {
+          addToHistory('agent', message.text);
+          speakText(message.text);
+        }
+        
+        if (message.conversationState) {
+          setConversationState(message.conversationState);
+        }
+        
+        setIsProcessing(false);
+        break;
+
+      case 'booking_confirmed':
+        setCompletedBooking(message.booking);
+        setBookingComplete(true);
+        
+        if (message.text) {
+          addToHistory('agent', message.text);
+          speakText(message.text);
+        }
+        
+        setIsProcessing(false);
+        break;
+
+      case 'error':
+        const errorMsg = message.message || 'An error occurred';
+        setError(errorMsg);
+        addToHistory('agent', `Sorry, ${errorMsg}`);
+        speakText(`Sorry, ${errorMsg}`);
+        setIsProcessing(false);
+        break;
+
+      case 'processing':
+        setIsProcessing(true);
+        break;
+
+      default:
+        console.warn('Unknown message type:', message.type);
+    }
+  };
+
+  /**
+   * Check if booking information is complete
+   */
+  const isBookingInfoComplete = () => {
+    return !!(
+      conversationState.customerName &&
+      conversationState.numberOfGuests &&
+      conversationState.bookingDate &&
+      conversationState.bookingTime &&
+      conversationState.seatingPreference
+    );
+  };
+
+  /**
+   * Check if message is a confirmation
+   */
+  const isConfirmationMessage = (message) => {
+    const confirmPatterns = /^(yes|yeah|yep|yup|sure|ok|okay|confirm|correct|right|that's right|sounds good|perfect|book it|go ahead|proceed)/i;
+    return confirmPatterns.test(message.trim());
+  };
+
+  /**
+   * Send message via WebSocket
+   */
+  const sendMessage = (userMessage) => {
+    if (!userMessage || userMessage.trim() === '') return;
+    
+    if (!wsConnected || !wsRef.current) {
+      setError('Not connected to server. Please wait...');
+      return;
+    }
+
+    // Add user message to history
+    addToHistory('user', userMessage);
+    
+    setIsProcessing(true);
+    setError(null);
+
+    console.log('🔍 Checking message:', userMessage);
+    console.log('📊 Current state:', conversationState);
+    console.log('✅ Booking complete?', isBookingInfoComplete());
+    console.log('✔️ Is confirmation?', isConfirmationMessage(userMessage));
+
+    // Check if this is a confirmation and all info is collected
+    if (isConfirmationMessage(userMessage) && isBookingInfoComplete()) {
+      console.log('🎉 Finalizing booking...');
+      finalizeBooking(conversationState);
+    } else {
+      // Send via WebSocket for normal conversation
+      wsRef.current.send(JSON.stringify({
+        type: 'user_message',
+        message: userMessage,
+        conversationState: conversationState,
+        weatherInfo: weatherInfo
+      }));
+    }
+  };
+
+  /**
+   * Finalize booking
+   */
+  const finalizeBooking = (bookingData) => {
+    if (!wsConnected || !wsRef.current) {
+      setError('Cannot complete booking - not connected');
+      return;
+    }
+
+    console.log('💾 Sending finalize_booking request:', bookingData);
+    setIsProcessing(true);
+
+    // Send booking finalization request
+    wsRef.current.send(JSON.stringify({
+      type: 'finalize_booking',
+      bookingData: {
+        ...bookingData,
+        weatherInfo: weatherInfo
+      }
+    }));
+  };
+
+  /**
+   * Add message to history
    */
   const addToHistory = (sender, message) => {
     setConversationHistory(prev => [
@@ -81,7 +354,7 @@ const VoiceAgent = () => {
     setIsSpeaking(true);
     speechService.speak(
       text,
-      () => setIsSpeaking(false), // onEnd
+      () => setIsSpeaking(false),
       (error) => {
         console.error('TTS Error:', error);
         setIsSpeaking(false);
@@ -90,12 +363,15 @@ const VoiceAgent = () => {
   };
 
   /**
-   * Start listening for user input
+   * Start listening
    */
   const startListening = () => {
     setError(null);
     resetTranscript();
-    SpeechRecognition.startListening({ continuous: false, language: 'en-IN' });
+    SpeechRecognition.startListening({ 
+      continuous: false, 
+      language: 'en-IN' 
+    });
   };
 
   /**
@@ -106,96 +382,7 @@ const VoiceAgent = () => {
   };
 
   /**
-   * Send user message to AI and get response
-   */
-  const sendMessage = async (userMessage) => {
-    if (!userMessage || userMessage.trim() === '') return;
-
-    // Add user message to history
-    addToHistory('user', userMessage);
-    
-    setIsProcessing(true);
-    setError(null);
-
-    try {
-      // Call chat API
-      const response = await bookingAPI.chatBooking(userMessage, conversationState);
-
-      if (response.success) {
-        const { response: aiResponse, conversationState: newState, isComplete } = response.data;
-
-        // Update conversation state
-        setConversationState(newState);
-
-        // Add AI response to history
-        addToHistory('agent', aiResponse);
-
-        // Speak AI response
-        speakText(aiResponse);
-
-        // Check if booking is complete
-        if (isComplete) {
-          // Wait a moment, then finalize booking
-          setTimeout(() => finalizeBooking(newState), 2000);
-        }
-      } else {
-        throw new Error(response.message || 'Failed to get AI response');
-      }
-    } catch (error) {
-      console.error('Chat error:', error);
-      const errorMessage = 'Sorry, I encountered an error. Please try again.';
-      setError(error.message || 'Connection error');
-      addToHistory('agent', errorMessage);
-      speakText(errorMessage);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  /**
-   * Finalize booking by saving to database
-   */
-  const finalizeBooking = async (bookingData) => {
-    try {
-      setIsProcessing(true);
-
-      // Prepare booking data for API
-      const bookingPayload = {
-        customerName: bookingData.customerName,
-        numberOfGuests: bookingData.numberOfGuests,
-        bookingDate: bookingData.bookingDate || bookingData.date,
-        bookingTime: bookingData.bookingTime || bookingData.time,
-        cuisinePreference: bookingData.cuisinePreference || bookingData.cuisine || 'Any',
-        specialRequests: bookingData.specialRequests || bookingData.specialRequest || '',
-        seatingPreference: bookingData.seatingPreference || 'any',
-      };
-
-      // Create booking via API
-      const response = await bookingAPI.createBooking(bookingPayload);
-
-      if (response.success) {
-        setCompletedBooking(response.data);
-        setBookingComplete(true);
-
-        const successMessage = `Perfect! Your booking is confirmed with ID ${response.data.bookingId}. We look forward to serving you!`;
-        addToHistory('agent', successMessage);
-        speakText(successMessage);
-      } else {
-        throw new Error(response.message || 'Failed to create booking');
-      }
-    } catch (error) {
-      console.error('Booking creation error:', error);
-      const errorMessage = 'Sorry, there was an issue creating your booking. Please try again.';
-      setError(error.message || 'Booking failed');
-      addToHistory('agent', errorMessage);
-      speakText(errorMessage);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  /**
-   * Handle manual send button click
+   * Handle send button
    */
   const handleSendClick = () => {
     if (transcript && transcript.trim() !== '') {
@@ -205,7 +392,7 @@ const VoiceAgent = () => {
   };
 
   /**
-   * Handle Enter key in transcript display
+   * Handle Enter key
    */
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -225,7 +412,14 @@ const VoiceAgent = () => {
     setError(null);
     resetTranscript();
     speechService.cancel();
-    startConversation();
+    
+    // Request new greeting
+    if (wsConnected && wsRef.current) {
+      wsRef.current.send(JSON.stringify({
+        type: 'greeting',
+        weatherInfo: weatherInfo
+      }));
+    }
   };
 
   return (
@@ -233,6 +427,22 @@ const VoiceAgent = () => {
       <header className="voice-agent-header">
         <h1>🎙️ Restaurant Voice Booking</h1>
         <p>Speak naturally to book your table</p>
+        
+        {/* Connection Status */}
+        <div className="connection-status">
+          {wsConnected ? (
+            <span className="status-connected">🟢 Connected</span>
+          ) : (
+            <span className="status-disconnected">🔴 Disconnected</span>
+          )}
+        </div>
+
+        {/* Weather Info */}
+        {weatherInfo && (
+          <div className="weather-badge">
+            🌤️ {weatherInfo.temperature}°C, {weatherInfo.description}
+          </div>
+        )}
       </header>
 
       {/* Conversation Display */}
@@ -262,7 +472,7 @@ const VoiceAgent = () => {
         <div ref={chatEndRef} />
       </div>
 
-      {/* Booking Confirmation Card */}
+      {/* Booking Confirmation */}
       {bookingComplete && completedBooking && (
         <div className="booking-confirmation">
           <h3>✅ Booking Confirmed!</h3>
@@ -273,8 +483,11 @@ const VoiceAgent = () => {
             <p><strong>Date:</strong> {new Date(completedBooking.bookingDate).toLocaleDateString()}</p>
             <p><strong>Time:</strong> {completedBooking.bookingTime}</p>
             <p><strong>Cuisine:</strong> {completedBooking.cuisinePreference}</p>
-            {completedBooking.seatingPreference !== 'any' && (
+            {completedBooking.seatingPreference && completedBooking.seatingPreference !== 'any' && (
               <p><strong>Seating:</strong> {completedBooking.seatingPreference}</p>
+            )}
+            {completedBooking.weatherInfo && (
+              <p><strong>Weather:</strong> {completedBooking.weatherInfo.temperature}°C, {completedBooking.weatherInfo.description}</p>
             )}
           </div>
         </div>
@@ -289,14 +502,13 @@ const VoiceAgent = () => {
 
       {/* Voice Controls */}
       <div className="voice-controls">
-        {/* Transcript Display */}
         <div className="transcript-box">
           <p className="transcript-label">
             {listening ? '🎤 Listening...' : '💬 Your message:'}
           </p>
           <textarea
             value={transcript}
-            onChange={(e) => {}} // Read-only but allow manual edit if needed
+            onChange={(e) => {}}
             onKeyPress={handleKeyPress}
             placeholder="Click the microphone to speak..."
             className="transcript-input"
@@ -304,13 +516,12 @@ const VoiceAgent = () => {
           />
         </div>
 
-        {/* Control Buttons */}
         <div className="control-buttons">
           {!listening ? (
             <button 
               onClick={startListening} 
               className="btn btn-primary btn-large"
-              disabled={isProcessing || isSpeaking}
+              disabled={isProcessing || isSpeaking || !wsConnected}
             >
               🎤 Start Speaking
             </button>
@@ -326,32 +537,58 @@ const VoiceAgent = () => {
           <button 
             onClick={handleSendClick}
             className="btn btn-success"
-            disabled={!transcript || isProcessing}
+            disabled={!transcript || isProcessing || !wsConnected}
           >
             📤 Send
           </button>
 
+          {/* Show Confirm Booking button when all info is collected */}
+          {isBookingInfoComplete() && !bookingComplete && (
+            <button 
+              onClick={() => finalizeBooking(conversationState)}
+              className="btn btn-confirm"
+              disabled={isProcessing}
+            >
+              ✅ Confirm Booking
+            </button>
+          )}
+
           <button 
             onClick={resetConversation}
             className="btn btn-secondary"
+            disabled={isProcessing}
           >
             🔄 New Booking
           </button>
         </div>
 
-        {/* Status Indicators */}
         <div className="status-indicators">
           {listening && <span className="status-badge listening">🎤 Listening</span>}
           {isProcessing && <span className="status-badge processing">⚙️ Processing</span>}
           {isSpeaking && <span className="status-badge speaking">🔊 Speaking</span>}
+          {wsConnected && <span className="status-badge connected">🌐 Online</span>}
         </div>
       </div>
 
-      {/* Current Booking State (Debug - can remove in production) */}
+      {/* Current State Debug */}
       {Object.keys(conversationState).length > 0 && (
         <details className="debug-state">
-          <summary>📊 Current Booking Info (Debug)</summary>
+          <summary>📊 Current Booking Info (Click to expand)</summary>
           <pre>{JSON.stringify(conversationState, null, 2)}</pre>
+          <div className="debug-actions">
+            <p><strong>Booking Complete:</strong> {isBookingInfoComplete() ? '✅ Yes' : '❌ No'}</p>
+            {!isBookingInfoComplete() && (
+              <p><strong>Missing:</strong> {
+                [
+                  !conversationState.customerName && 'Name',
+                  !conversationState.numberOfGuests && 'Guests',
+                  !conversationState.bookingDate && 'Date',
+                  !conversationState.bookingTime && 'Time',
+                  !conversationState.seatingPreference && 'Seating'
+                ].filter(Boolean).join(', ')
+              }</p>
+            )}
+          </div>
         </details>
       )}
     </div>

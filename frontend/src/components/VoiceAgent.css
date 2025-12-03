@@ -389,3 +389,124 @@
     min-width: 100%;
   }
 }
+
+/* Confirm Button */
+.btn-confirm {
+  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+  color: white;
+  font-size: 1.1rem;
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+  animation: pulse-green 2s infinite;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+@keyframes pulse-green {
+  0%, 100% {
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+  }
+  50% {
+    box-shadow: 0 4px 25px rgba(76, 175, 80, 0.8);
+  }
+}
+
+.btn-confirm:hover {
+  background: linear-gradient(135deg, #45a049 0%, #4caf50 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.6);
+}
+
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  animation: none;
+}
+
+/* Connected Status Badge */
+.status-badge.connected {
+  background: #2196f3;
+  color: white;
+}
+
+/* Debug State Enhancements */
+.debug-state {
+  margin-top: 20px;
+  background: white;
+  padding: 15px;
+  border-radius: 10px;
+  border: 2px dashed #667eea;
+}
+
+.debug-state summary {
+  cursor: pointer;
+  font-weight: bold;
+  color: #667eea;
+  margin-bottom: 10px;
+  user-select: none;
+}
+
+.debug-state summary:hover {
+  color: #764ba2;
+}
+
+.debug-actions {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.debug-actions p {
+  margin: 5px 0;
+  font-size: 0.95rem;
+}
+
+.debug-actions strong {
+  color: #667eea;
+}
+
+/* Connection Status Badges */
+.connection-status {
+  margin-top: 10px;
+}
+
+.status-connected {
+  background: #4caf50;
+  color: white;
+  padding: 5px 15px;
+  border-radius: 15px;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.status-disconnected {
+  background: #f44336;
+  color: white;
+  padding: 5px 15px;
+  border-radius: 15px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50%, 100% {
+    opacity: 1;
+  }
+  25%, 75% {
+    opacity: 0.5;
+  }
+}
+
+/* Weather Badge */
+.weather-badge {
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  display: inline-block;
+}

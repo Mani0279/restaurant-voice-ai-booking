@@ -1,270 +1,120 @@
-import React, { useState, useEffect } from 'react';
-import { bookingAPI } from '../services/api';
+import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 import './BookingList.css';
 
-/**
- * BookingList Component
- * Display all bookings with filter and search capabilities
- */
 const BookingList = () => {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [filter, setFilter] = useState('all'); // all, confirmed, cancelled
-  const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch bookings on component mount
-  useEffect(() => {
-    fetchBookings();
-  }, [filter]);
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
-  /**
-   * Fetch all bookings from API
-   */
-  const fetchBookings = async () => {
+  const fetchBookings = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-
-      const filters = {};
-      if (filter !== 'all') {
-        filters.status = filter;
-      }
-
-      const response = await bookingAPI.getAllBookings(filters);
-      
-      if (response.success) {
-        setBookings(response.data);
+      const response = await axios.get(`${API_URL}/bookings`);
+      if (response.data.success) {
+        setBookings(response.data.data || response.data.bookings || []);
       } else {
-        throw new Error(response.message || 'Failed to fetch bookings');
+        setError('Failed to load bookings');
       }
     } catch (err) {
-      console.error('Fetch bookings error:', err);
-      setError(err.message || 'Failed to load bookings');
+      console.error('Error fetching bookings:', err);
+      setError(err.response?.data?.message || 'Failed to load bookings');
     } finally {
       setLoading(false);
     }
-  };
+  }, [API_URL]);
 
-  /**
-   * Cancel a booking
-   */
-  const handleCancelBooking = async (bookingId) => {
-    if (!window.confirm('Are you sure you want to cancel this booking?')) {
-      return;
-    }
+  useEffect(() => {
+    fetchBookings();
+  }, [fetchBookings]);
+
+  const handleDeleteBooking = async (bookingId) => {
+    if (!window.confirm('Are you sure you want to cancel this booking?')) return;
 
     try {
-      const response = await bookingAPI.cancelBooking(bookingId);
-      
-      if (response.success) {
+      const response = await axios.delete(`${API_URL}/bookings/${bookingId}`);
+      if (response.data.success) {
+        setBookings(bookings.filter(b => b._id !== bookingId));
         alert('Booking cancelled successfully');
-        fetchBookings(); // Refresh list
       } else {
-        throw new Error(response.message || 'Failed to cancel booking');
+        alert('Failed to cancel booking');
       }
     } catch (err) {
-      console.error('Cancel booking error:', err);
-      alert('Failed to cancel booking: ' + err.message);
+      alert(err.response?.data?.message || 'Failed to cancel booking');
     }
   };
 
-  /**
-   * Filter bookings by search term
-   */
-  const filteredBookings = bookings.filter(booking => {
-    if (!searchTerm) return true;
-    
-    const search = searchTerm.toLowerCase();
-    return (
-      booking.customerName.toLowerCase().includes(search) ||
-      booking.bookingId.toLowerCase().includes(search) ||
-      booking.cuisinePreference.toLowerCase().includes(search)
-    );
-  });
-
-  /**
-   * Format date for display
-   */
   const formatDate = (dateString) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  /**
-   * Get status badge class
-   */
-  const getStatusClass = (status) => {
-    switch (status) {
-      case 'confirmed':
-        return 'status-confirmed';
-      case 'cancelled':
-        return 'status-cancelled';
-      case 'completed':
-        return 'status-completed';
-      default:
-        return 'status-pending';
-    }
+  const formatTime = (timeString) => {
+    if (timeString.includes('PM') || timeString.includes('AM')) return timeString;
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
   };
+
+  if (loading) return <div className="container"><h2>📋 Restaurant Bookings</h2><p className="loading">Loading bookings...</p></div>;
+  if (error) return <div className="container"><h2>📋 Restaurant Bookings</h2><p className="error">⚠️ {error}</p><button onClick={fetchBookings} className="btn-refresh">🔄 Retry</button></div>;
 
   return (
-    <div className="booking-list-container">
-      <header className="booking-list-header">
-        <h1>📋 All Bookings</h1>
-        <p>Manage and view restaurant reservations</p>
+    <div className="container">
+      <header className="header">
+        <h2>📋 Restaurant Bookings</h2>
+        <button onClick={fetchBookings} className="btn-refresh">🔄 Refresh</button>
       </header>
 
-      {/* Filters and Search */}
-      <div className="booking-controls">
-        <div className="filter-tabs">
-          <button 
-            className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
-            onClick={() => setFilter('all')}
-          >
-            All Bookings
-          </button>
-          <button 
-            className={`filter-tab ${filter === 'confirmed' ? 'active' : ''}`}
-            onClick={() => setFilter('confirmed')}
-          >
-            Confirmed
-          </button>
-          <button 
-            className={`filter-tab ${filter === 'cancelled' ? 'active' : ''}`}
-            onClick={() => setFilter('cancelled')}
-          >
-            Cancelled
-          </button>
-        </div>
-
-        <div className="search-box">
-          <input
-            type="text"
-            placeholder="🔍 Search by name, ID, or cuisine..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="search-input"
-          />
-        </div>
-
-        <button onClick={fetchBookings} className="btn-refresh">
-          🔄 Refresh
-        </button>
-      </div>
-
-      {/* Loading State */}
-      {loading && (
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading bookings...</p>
-        </div>
-      )}
-
-      {/* Error State */}
-      {error && (
-        <div className="error-state">
-          <p>⚠️ {error}</p>
-          <button onClick={fetchBookings} className="btn-retry">
-            Try Again
-          </button>
-        </div>
-      )}
-
-      {/* Bookings Grid */}
-      {!loading && !error && (
+      {bookings.length === 0 ? (
+        <div className="empty">No bookings found<br /><small>Start by making a voice booking!</small></div>
+      ) : (
         <>
-          <div className="booking-stats">
-            <p>
-              Showing <strong>{filteredBookings.length}</strong> of <strong>{bookings.length}</strong> bookings
-            </p>
+          <div className="grid">
+            {bookings.map((booking) => (
+              <div key={booking._id} className="card">
+                <div className="card-header">
+                  <h3>{booking.customerName}</h3>
+                  <span className="status">CONFIRMED</span>
+                </div>
+
+                <div className="card-body">
+                  <div className="row"><span>🆔 ID:</span> <span>{booking.bookingId}</span></div>
+                  <div className="row"><span>👥 Guests:</span> <span>{booking.numberOfGuests} people</span></div>
+                  <div className="row"><span>📅 Date:</span> <span>{formatDate(booking.bookingDate)}</span></div>
+                  <div className="row"><span>🕐 Time:</span> <span>{formatTime(booking.bookingTime)}</span></div>
+                  
+                  {booking.cuisinePreference && booking.cuisinePreference !== 'Any' && (
+                    <div className="row"><span>🍽️ Cuisine:</span> <span>{booking.cuisinePreference}</span></div>
+                  )}
+                  
+                  {booking.seatingPreference && booking.seatingPreference !== 'any' && (
+                    <div className="row"><span>🪑 Seating:</span> <span>{booking.seatingPreference}</span></div>
+                  )}
+                  
+                  {booking.specialRequests && (
+                    <div className="row"><span>✨ Special:</span> <span>{booking.specialRequests}</span></div>
+                  )}
+                </div>
+
+                <div className="card-footer">
+                  <small>Created: {new Date(booking.createdAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</small>
+                  <button onClick={() => handleDeleteBooking(booking._id)} className="btn-cancel">
+                    ❌ Cancel
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
 
-          {filteredBookings.length === 0 ? (
-            <div className="empty-state">
-              <h3>No bookings found</h3>
-              <p>
-                {searchTerm 
-                  ? 'Try a different search term' 
-                  : 'No bookings match the selected filter'}
-              </p>
-            </div>
-          ) : (
-            <div className="bookings-grid">
-              {filteredBookings.map((booking) => (
-                <div key={booking._id} className="booking-card">
-                  <div className="booking-card-header">
-                    <h3>{booking.customerName}</h3>
-                    <span className={`status-badge ${getStatusClass(booking.status)}`}>
-                      {booking.status}
-                    </span>
-                  </div>
-
-                  <div className="booking-card-body">
-                    <div className="booking-info">
-                      <span className="info-label">📅 Date:</span>
-                      <span className="info-value">{formatDate(booking.bookingDate)}</span>
-                    </div>
-
-                    <div className="booking-info">
-                      <span className="info-label">⏰ Time:</span>
-                      <span className="info-value">{booking.bookingTime}</span>
-                    </div>
-
-                    <div className="booking-info">
-                      <span className="info-label">👥 Guests:</span>
-                      <span className="info-value">{booking.numberOfGuests}</span>
-                    </div>
-
-                    <div className="booking-info">
-                      <span className="info-label">🍽️ Cuisine:</span>
-                      <span className="info-value">{booking.cuisinePreference}</span>
-                    </div>
-
-                    {booking.seatingPreference !== 'any' && (
-                      <div className="booking-info">
-                        <span className="info-label">💺 Seating:</span>
-                        <span className="info-value">{booking.seatingPreference}</span>
-                      </div>
-                    )}
-
-                    {booking.specialRequests && (
-                      <div className="booking-info special-requests">
-                        <span className="info-label">📝 Special:</span>
-                        <span className="info-value">{booking.specialRequests}</span>
-                      </div>
-                    )}
-
-                    {booking.weatherInfo && booking.weatherInfo.condition !== 'unknown' && (
-                      <div className="booking-info weather-info">
-                        <span className="info-label">🌤️ Weather:</span>
-                        <span className="info-value">
-                          {booking.weatherInfo.description}, {booking.weatherInfo.temperature}°C
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="booking-card-footer">
-                    <small className="booking-id">ID: {booking.bookingId}</small>
-                    
-                    {booking.status === 'confirmed' && (
-                      <button 
-                        onClick={() => handleCancelBooking(booking._id)}
-                        className="btn-cancel"
-                      >
-                        ❌ Cancel
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <footer className="footer">
+            Total Bookings: {bookings.length}
+          </footer>
         </>
       )}
     </div>
