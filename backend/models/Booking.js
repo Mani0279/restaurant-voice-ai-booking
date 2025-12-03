@@ -42,7 +42,7 @@ bookingDate: {
   bookingTime: {
     type: String,
     required: [true, 'Booking time is required'],
-    match: [/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Please provide valid time in HH:MM format']
+    match: [/^\d{1,2}:\d{2}\s*(AM|PM)?$/i, 'Please provide a valid time (e.g., 8:00 PM or 20:00)']
   },
   
   cuisinePreference: {
